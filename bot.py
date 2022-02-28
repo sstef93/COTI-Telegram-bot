@@ -204,6 +204,10 @@ e.g.
         if timestamp:
             avgprice = cex_data(timestamp)
             if avgprice:
+                loginfo = f"{user_id} | @{usrname} | {fullname} |\r\n{tx_hash}\r\n{amount} COTI | $ {avgprice} | {readable_timestamp}\r\n"
+                logging.info(loginfo)
+                print(loginfo)
+                
                 resp_ = (
 f"""<b>TX-hash: </b><code>{tx_hash}</code>
 

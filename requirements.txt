@@ -1,0 +1,4 @@
+logging
+requests
+python-telegram-bot
+pytz

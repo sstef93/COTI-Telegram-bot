@@ -7,11 +7,24 @@ from datetime import datetime
 import pytz
 
 from requests.exceptions import HTTPError
-from telegram import Update, ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
+from telegram import (
+    Update,
+    ForceReply,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+from telegram.ext import (
+    Updater,
+    CommandHandler,
+    MessageHandler,
+    Filters,
+    CallbackContext,
+    CallbackQueryHandler
+)
 
 # Enable logging
 logging.basicConfig(
+    filename='tgbot.log', filemode='a',
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 
@@ -123,7 +136,7 @@ def ep_cmd(update: Update, context: CallbackContext) -> None:
         btimeend = int(float(timeend) * 1000.0)
         
         ktimestamp = round(float(timestamp))
-        ktimeend = round(float(timestamp))
+        ktimeend = round(float(timeend))
         
         URLs = {
             "binance": f"https://api1.binance.com/api/v3/klines?symbol=COTIUSDT&interval=1m&startTime={btimestamp}&endTime={btimeend}",
@@ -179,7 +192,15 @@ e.g.
     if len(args_) == 1:
         tx_hash = args_[0]
         timestamp, amount = coti_tx(tx_hash)
-        print(timestamp, amount)
+        amount = '{:,}'.format(amount)
+        readable_timestamp = datetime.utcfromtimestamp(timestamp).strftime('%d-%m-%y %H:%M:%S')
+        
+        #log
+        from_user = update.message.from_user
+        user_id = from_user['id']
+        fullname = " | ".join((from_user['first_name'],str(from_user['last_name'])))
+        usrname = str(from_user['username'])
+        
         if timestamp:
             avgprice = cex_data(timestamp)
             if avgprice:
@@ -188,13 +209,52 @@ f"""<b>TX-hash: </b><code>{tx_hash}</code>
 
 <b>Entry Price : </b><pre>{avgprice}</pre>
 <b>Amount      : </b><pre>{amount}</pre> COTI
-<b>Deposit Date: </b><pre>{datetime.utcfromtimestamp(timestamp).strftime('%d-%m-%y %H:%M:%S')}</pre>"""
+<b>Deposit Date: </b><pre>{readable_timestamp}</pre>"""
                 )
                 update.message.reply_html(resp_, disable_web_page_preview=True)
             else: return
     else:
         update.message.reply_html(resperr_, disable_web_page_preview=True)
         return
+
+def ephf_cmd(update: Update, context: CallbackContext) -> None:
+    """custom test command"""
+    args_ = context.args
+    resperr_ = (
+"""Wrong or missing arguments.
+
+To calculate <b>Entry Price</b> please use as follows:
+
+<b><i>/ephf leverage current_HF</i></b>
+
+e.g.
+<code>/ephf 4x 1.10</code>"""
+    )
+    
+    if len(args_) == 2:
+        try:
+            lev = int(args_[0].replace('x',''))
+            hf = float(args_[1])
+            cprice = coti_price()
+            if cprice:
+                math_equation = (lev / (lev - 1)) / (hf / cprice)
+                result = round(math_equation,8)
+            else:
+                update.message.reply_html(resperr_, disable_web_page_preview=True)
+                return
+        except:
+            update.message.reply_html(resperr_, disable_web_page_preview=True)
+            return
+        
+        resp_ = (
+f"""<pre><b>Leverage     :</b> {lev}x
+<b>Entry Price  :</b> {result}
+<b>Current Price:</b> {cprice}
+<b>Current HF   :</b> {hf}</pre>"""
+        )
+        update.message.reply_html(resp_, disable_web_page_preview=True)
+    else:
+        update.message.reply_html(resperr_, disable_web_page_preview=True)
 
 
 def lp_cmd(update: Update, context: CallbackContext) -> None:
@@ -293,7 +353,9 @@ def newhf_cmd(update: Update, context: CallbackContext) -> None:
 
 To calculate <b>Health Factor</b> please use as follows:
 
-<b><i>/newhf leverage initial_deposit_amount new_deposit_amount original_deposit_price current_coti_price(optional)</i></b>
+<b><i>/newhf leverage initial_deposit_amount new_deposit_amount original_deposit_price new_deposit_price(**optional)</i></b>
+
+<i>**If not provided will use current treasury price</i>
 
 e.g.
 <code>/newhf 2x 1000 500 0.31</code>"""
@@ -315,6 +377,7 @@ e.g.
                    update.message.reply_html(resperr_+"<pre>[Error getting price!]</pre>", disable_web_page_preview=True)
             HFR = lev / (lev -1)
             result = round((HFR/((deposit*iprice+ndeposit*nprice)/(deposit*nprice+ndeposit*nprice))),3)
+            avgentry = round((((deposit*iprice) + (ndeposit*nprice)) / (deposit+ndeposit)),8)
         except Exception as err:
             exc_type, exc_obj, exc_tb = sys.exc_info()
             errln = exc_tb.tb_lineno
@@ -322,13 +385,23 @@ e.g.
             update.message.reply_html(resperr_, disable_web_page_preview=True)
             return
         
-        resp_ = (
-f"""<pre><b>Leverage:       </b> {lev}x
+        total = (deposit+ndeposit)
+        o_resp_ = (
+f"""<pre>
+<b>Leverage     :  </b> {lev}x
 <b>Init. Deposit:  </b> {deposit}
-<b>New Deposit:    </b> {ndeposit}
-<b>Entry Price:    </b> {iprice}
-<b>Current Price:  </b> {nprice}
-<b>New HF:         </b> {result}</pre>"""
+<b>New Deposit  :  </b> {ndeposit}
+<b>Entry Price  :  </b> {iprice}
+<b>Deposit Price:  </b> {nprice}
+<b>Avg. Entry   :  </b> {avgentry}
+<b>New HF       :  </b> {result}</pre>"""
+        )
+        resp_ = (
+f"""<pre>
+<b>Leverage   : </b> {lev}x
+<b>New Deposit: </b> {total}
+<b>Avg. Entry : </b> {avgentry}
+<b>New HF     : </b> {result}</pre>"""
         )
         update.message.reply_html(resp_, disable_web_page_preview=True)
     else:
@@ -378,6 +451,7 @@ def getprice_cmd(update: Update, context: CallbackContext) -> None:
                     tree = jsonResponse['data'][ticker][0]
                     total_supply = int(tree['total_supply'])
                     circulating_supply = int(tree['circulating_supply'])
+                    cmc_rank = int(tree['cmc_rank'])
                     #--
                     if use_cmc == True:
                         price = round(float(tree['quote']['USD']['price']),4)
@@ -408,6 +482,7 @@ f"""<b>{ticker}</b> $ <pre>{price}</pre>
 H|L  : {hprice} | {lprice}
 24h  : {_24hCH}%
 Cap  : {cap}
+Rank : {cmc_rank}
 Circ.: {circulating_supply}
 Total: {total_supply}</pre>
 """
@@ -679,6 +754,7 @@ def main() -> None:
             dispatcher.add_handler(CommandHandler("testnodes", gettestnodes_cmd))
             dispatcher.add_handler(CommandHandler("lp", lp_cmd))
             dispatcher.add_handler(CommandHandler("ep", ep_cmd))
+            dispatcher.add_handler(CommandHandler("ephf", ephf_cmd))
             
         #sharktank
         if bot_ in {'crypto_sharktank_bot'}:
